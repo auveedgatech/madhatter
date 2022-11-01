@@ -1,6 +1,9 @@
 import RPi.GPIO as GPIO
 from time import sleep
 from enum import Enum
+import os, sys
+import serial
+import string
 import pygame
 
 GPIO.setwarnings(False)
@@ -47,6 +50,19 @@ def motion_teacups_callback(channel):
     global current_state
     current_state = State.MOTION_TEACUPS_TEST
 
+def enable_director_code(channel):
+    global current_state
+    current_state = State.CONNECT_TO_DIRECTOR
+
+# Audio Setup
+ser = serial.Serial('/dev/ttyACM0', 9600)
+def parse_int_serial(str):
+    return int(str.strip(string.ascii_letters))
+
+#Sends audio to headphone jack
+pygame.mixer.init()
+
+
 # Setup Pushbuttons
 
 #Reset Button
@@ -74,6 +90,11 @@ pin_motion_test = 37
 GPIO.setup(pin_motion_test, GPIO.IN, pull_up_down = GPIO.PUD_DOWN)
 GPIO.add_event_detect(pin_motion_test, GPIO.RISING, callback=motion_teacups_callback)
 
+# Director Button:
+director_pin = 38
+GPIO.setup(director_pin, GPIO.IN, pull_up_down = GPIO.PUD_DOWN)
+GPIO.add_event_detect(director_pin, GPIO.RISING, callback=enable_director_code)
+
 # Setup External Components:
 led_out = GPIO.LOW
 led_output_port = 18
@@ -90,68 +111,108 @@ servo_cups = GPIO.PWM(cups_pin, 50)
 servo_cups.start(2.5)
 
 # Servo Functions
-def move_servo(p):
-    p.ChangeDutyCycle(5)
-    sleep(0.5)
-    p.ChangeDutyCycle(7.5)
-    sleep(0.5)
-    p.ChangeDutyCycle(10)
-    sleep(0.5)
-    p.ChangeDutyCycle(12.5)
-    sleep(0.5)
-    p.ChangeDutyCycle(10)
-    sleep(0.5)
-    p.ChangeDutyCycle(7.5)
-    sleep(0.5)
-    p.ChangeDutyCycle(5)
-    sleep(0.5)
+def move_hat(p):
     p.ChangeDutyCycle(2.5)
-    sleep(0.5)
+    sleep(1)
+    p.ChangeDutyCycle(0)
+    sleep(4)
+    p.ChangeDutyCycle(12.5)
+    sleep(1)
+    p.ChangeDutyCycle(0)
+    sleep(4)
+    
+def move_teacups(p):
+    p.ChangeDutyCycle(2.5)
+    sleep(1)
+    p.ChangeDutyCycle(0)
+    sleep(4)
+    p.ChangeDutyCycle(7.5)
+    sleep(1)
+    p.ChangeDutyCycle(0)
+    sleep(4)
+    p.ChangeDutyCycle(12.5)
+    sleep(1)
+    p.ChangeDutyCycle(0)
+    sleep(4)
+    p.ChangeDutyCycle(7.5)
+    sleep(1)
+    p.ChangeDutyCycle(0)
+    sleep(4)
 
+# Network Functions
+import sys
+import socket
+import selectors
+import traceback
+import multiprocessing
+import time
+import keyboard 
 
+from Protocol import libserver
+from Protocol import libclient
+
+from Utils.robotUtils import create_request, listen_for_director, start_connection, initiate_connection
+
+ROBOT_NAME = "Robot0"
+HOST = "172.20.10.14"
+PORT = 65432 
+
+LISTEN_PORT = 65433
+
+def register_with_director():
+    try:
+        global current_state
+        print('Register with director...')
+        registration_request = create_request(ROBOT_NAME, "Register", LISTEN_PORT)
+        initiate_connection(HOST, PORT, registration_request, libclient)
+        print('Finished registration, booting up server to listen...')
+        current_state = State.WAIT_FOR_INTRUCTION
+    except:
+        print("Failed to connect, return to IDLE")
+        current_state = State.IDLE
+        
+#Main loop
 while True:
     if current_state == State.IDLE:
+        # Idle State
+        
+        #LED Cleanup
         led_out = GPIO.LOW
         GPIO.output(led_output_port, led_out);
+        
+        # Servo Cleanup
         servo_hat.ChangeDutyCycle(0)
         servo_cups.ChangeDutyCycle(0)
-
-        sleep(0.1)
+        
+        # Audio Cleanup
+        pygame.mixer.music.stop()
     elif current_state == State.LED_TEST:
         # Set LED High:
-        print("Starting LED Test...")
         led_out = GPIO.HIGH;
-        GPIO.output(led_output_port, led_out);
-        sleep(6)
-        led_out = GPIO.LOW;
-        GPIO.output(led_output_port, led_out);
-        current_state = State.IDLE
-        print("Ending LED Test...")
-        
+        GPIO.output(led_output_port, led_out);        
     elif current_state == State.AUDIO_TEST:
-        print("Starting Audio Test...")
+        # Audio Test
+        if pygame.mixer.music.get_busy() == False:
+            pygame.mixer.music.load("name.wav")
+            pygame.mixer.music.play()
 
-        # Audio Setup
-        pygame.mixer.init()
-        pygame.mixer.music.load("name.wav")
-        pygame.mixer.music.play()
-        sleep(12.0)
-        pygame.mixer.music.pause()
-        current_state = State.IDLE
+        line = ser.readline()
+        if len(line) == 0:
+            print("Serial Setup Faile")
 
-        print("Ending Audio Test...")
+        volume = parse_int_serial(line.decode("utf-8"))
+        print(volume)
+        pygame.mixer.music.set_volume(volume/100)
         
     elif current_state == State.MOTION_HAT_TEST:
-        print("Starting Hat Test...")
-        while current_state == State.MOTION_HAT_TEST:
-            move_servo(servo_hat)
-        print("Ending Hat Test...")
+        # Hat Test
+        move_hat(servo_hat)
 
     elif current_state == State.MOTION_TEACUPS_TEST:
-        print("Starting Teacups Test...")
-        while current_state == State.MOTION_TEACUPS_TEST:
-            move_servo(servo_cups)
-        print("Ending Teacups Test...")
+        # Teacups Test
+        move_teacups(servo_cups)
+        
+    elif current_state == State.CONNECT_TO_DIRECTOR:
+        register_with_director()
 
-
-    sleep(0.5)
+    sleep(0.05)
