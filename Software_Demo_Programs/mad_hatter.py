@@ -5,6 +5,7 @@ import os, sys
 import serial
 import string
 import pygame
+import threading
 
 GPIO.setwarnings(False)
 GPIO.setmode(GPIO.BOARD)
@@ -22,7 +23,7 @@ class State(Enum):
     #DIRECTOR STATES
     CONNECT_TO_DIRECTOR = 5
     WAIT_FOR_INTRUCTION = 6
-    DECODE_FILE = 7
+    PERFORM_ALL = 7
     
 # Setup Current State
 current_state = State.IDLE
@@ -36,23 +37,28 @@ def reset_callback(channel):
     
 def led_test_callback(channel):
     global current_state
-    current_state = State.LED_TEST
+    if current_state == State.IDLE:
+        current_state = State.LED_TEST
     
 def audio_test_callback(channel):
     global current_state
-    current_state = State.AUDIO_TEST
+    if current_state == State.IDLE:
+        current_state = State.AUDIO_TEST
 
 def motion_hat_callback(channel):
     global current_state
-    current_state = State.MOTION_HAT_TEST
+    if current_state == State.IDLE:
+        current_state = State.MOTION_HAT_TEST
     
 def motion_teacups_callback(channel):
     global current_state
-    current_state = State.MOTION_TEACUPS_TEST
+    if current_state == State.IDLE:
+        current_state = State.MOTION_TEACUPS_TEST
 
 def enable_director_code(channel):
     global current_state
-    current_state = State.CONNECT_TO_DIRECTOR
+    if current_state == State.IDLE:
+        current_state = State.CONNECT_TO_DIRECTOR
 
 # Audio Setup
 ser = serial.Serial('/dev/ttyACM0', 9600)
@@ -112,28 +118,34 @@ servo_cups.start(2.5)
 
 # Servo Functions
 def move_hat(p):
+    if current_state == State.IDLE: return
     p.ChangeDutyCycle(2.5)
     sleep(1)
     p.ChangeDutyCycle(0)
     sleep(4)
+    if current_state == State.IDLE: return
     p.ChangeDutyCycle(12.5)
     sleep(1)
     p.ChangeDutyCycle(0)
     sleep(4)
     
 def move_teacups(p):
+    if current_state == State.IDLE: return
     p.ChangeDutyCycle(2.5)
     sleep(1)
     p.ChangeDutyCycle(0)
     sleep(4)
+    if current_state == State.IDLE: return
     p.ChangeDutyCycle(7.5)
     sleep(1)
     p.ChangeDutyCycle(0)
     sleep(4)
+    if current_state == State.IDLE: return
     p.ChangeDutyCycle(12.5)
     sleep(1)
     p.ChangeDutyCycle(0)
     sleep(4)
+    if current_state == State.IDLE: return
     p.ChangeDutyCycle(7.5)
     sleep(1)
     p.ChangeDutyCycle(0)
@@ -170,15 +182,72 @@ def register_with_director():
     except:
         print("Failed to connect, return to IDLE")
         current_state = State.IDLE
+
+#State Functions:
+def led_on():
+    led_out = GPIO.HIGH;
+    GPIO.output(led_output_port, led_out);        
+
+def led_off():
+    led_out = GPIO.LOW
+    GPIO.output(led_output_port, led_out);
+
+def audio_thread():
+    global current_state
+    # Audio Test
+    while True:
+        line = ser.readline()
+        if current_state == State.AUDIO_TEST or current_state == State.PERFORM_ALL:
+            if pygame.mixer.music.get_busy() == False:
+                pygame.mixer.music.load("name.wav")
+                pygame.mixer.music.play()
+
+            if len(line) == 0:
+                print("Serial Setup Failed")
+
+            volume = parse_int_serial(line.decode("utf-8"))
+            print(volume)
+            pygame.mixer.music.set_volume(volume/100)
+        sleep(0.1)
         
-#Main loop
+def motion_hat_thread():
+    global current_state
+    while True:
+        if current_state == State.MOTION_HAT_TEST or current_state == State.PERFORM_ALL:
+            move_hat(servo_hat)
+        sleep(0.1)
+        
+def motion_cups_thread():
+    global current_state
+    while True:
+        if current_state == State.MOTION_TEACUPS_TEST or current_state == State.PERFORM_ALL:
+            move_teacups(servo_cups)
+        sleep(0.1)
+
+def perform_all_thread():
+    t1 = threading.Thread(target=led_on)
+    t1.start()
+    
+#Main code
+# Make a thread for each state and start accordingly
+t_audio = threading.Thread(target=audio_thread)
+t_audio.start()
+
+t_hat = threading.Thread(target=motion_hat_thread)
+t_hat.start()
+
+t_cups = threading.Thread(target=motion_cups_thread)
+t_cups.start()
+
 while True:
+    
     if current_state == State.IDLE:
         # Idle State
+        is_perfoming = False
+        
         
         #LED Cleanup
-        led_out = GPIO.LOW
-        GPIO.output(led_output_port, led_out);
+        led_off()
         
         # Servo Cleanup
         servo_hat.ChangeDutyCycle(0)
@@ -186,33 +255,17 @@ while True:
         
         # Audio Cleanup
         pygame.mixer.music.stop()
+        
+
     elif current_state == State.LED_TEST:
         # Set LED High:
-        led_out = GPIO.HIGH;
-        GPIO.output(led_output_port, led_out);        
-    elif current_state == State.AUDIO_TEST:
-        # Audio Test
-        if pygame.mixer.music.get_busy() == False:
-            pygame.mixer.music.load("name.wav")
-            pygame.mixer.music.play()
-
-        line = ser.readline()
-        if len(line) == 0:
-            print("Serial Setup Faile")
-
-        volume = parse_int_serial(line.decode("utf-8"))
-        print(volume)
-        pygame.mixer.music.set_volume(volume/100)
-        
-    elif current_state == State.MOTION_HAT_TEST:
-        # Hat Test
-        move_hat(servo_hat)
-
-    elif current_state == State.MOTION_TEACUPS_TEST:
-        # Teacups Test
-        move_teacups(servo_cups)
-        
+        led_on()        
     elif current_state == State.CONNECT_TO_DIRECTOR:
-        register_with_director()
+        #register_with_director()
+        current_state = State.PERFORM_ALL
+    elif current_state == State.WAIT_FOR_INTRUCTION:
+        print("Awaiting for Instruction")
+    elif current_state == State.PERFORM_ALL:
+        led_on()
 
-    sleep(0.05)
+    sleep(0.1)
