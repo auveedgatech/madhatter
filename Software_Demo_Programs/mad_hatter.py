@@ -42,8 +42,12 @@ def led_test_callback(channel):
     
 def audio_test_callback(channel):
     global current_state
+    global play
     if current_state == State.IDLE:
+        play = True
         current_state = State.AUDIO_TEST
+    elif current_state == State.AUDIO_TEST:
+        play = True
 
 def motion_hat_callback(channel):
     global current_state
@@ -55,11 +59,15 @@ def motion_teacups_callback(channel):
     if current_state == State.IDLE:
         current_state = State.MOTION_TEACUPS_TEST
 
-def enable_director_code(channel):
+def play_line(channel):
     global current_state
+    global play
     if current_state == State.IDLE:
-        current_state = State.CONNECT_TO_DIRECTOR
-
+        play = True
+        current_state = State.PERFORM_ALL
+    elif current_state == State.PERFORM_ALL:
+        play = True
+        
 # Audio Setup
 ser = serial.Serial('/dev/ttyACM0', 9600)
 def parse_int_serial(str):
@@ -99,7 +107,7 @@ GPIO.add_event_detect(pin_motion_test, GPIO.RISING, callback=motion_teacups_call
 # Director Button:
 director_pin = 38
 GPIO.setup(director_pin, GPIO.IN, pull_up_down = GPIO.PUD_DOWN)
-GPIO.add_event_detect(director_pin, GPIO.RISING, callback=enable_director_code)
+GPIO.add_event_detect(director_pin, GPIO.RISING, callback=play_line)
 
 # Setup External Components:
 led_out = GPIO.LOW
@@ -192,21 +200,29 @@ def led_off():
     led_out = GPIO.LOW
     GPIO.output(led_output_port, led_out);
 
+lines = ["name.wav"]
+play = False
 def audio_thread():
     global current_state
-    # Audio Test
+    global play
+
+# Audio Test
     while True:
         line = ser.readline()
         if current_state == State.AUDIO_TEST or current_state == State.PERFORM_ALL:
             if pygame.mixer.music.get_busy() == False:
-                pygame.mixer.music.load("name.wav")
-                pygame.mixer.music.play()
+                if play == True:
+                    pygame.mixer.music.load(lines[0])
+                    pygame.mixer.music.play()
+                    play = False
+            else:
+                play = False
 
             if len(line) == 0:
                 print("Serial Setup Failed")
 
             volume = parse_int_serial(line.decode("utf-8"))
-            print(volume)
+            #print(volume)
             pygame.mixer.music.set_volume(volume/100)
         sleep(0.1)
         
@@ -223,10 +239,6 @@ def motion_cups_thread():
         if current_state == State.MOTION_TEACUPS_TEST or current_state == State.PERFORM_ALL:
             move_teacups(servo_cups)
         sleep(0.1)
-
-def perform_all_thread():
-    t1 = threading.Thread(target=led_on)
-    t1.start()
     
 #Main code
 # Make a thread for each state and start accordingly
@@ -243,8 +255,7 @@ while True:
     
     if current_state == State.IDLE:
         # Idle State
-        is_perfoming = False
-        
+        play = False
         
         #LED Cleanup
         led_off()
