@@ -159,20 +159,6 @@ def move_teacups(p):
     p.ChangeDutyCycle(0)
     sleep(4)
 
-# Network Functions
-import sys
-import socket
-import selectors
-import traceback
-import multiprocessing
-import time
-import keyboard 
-
-from Protocol import libserver
-from Protocol import libclient
-
-from Utils.robotUtils import create_request, listen_for_director, start_connection, initiate_connection
-
 ROBOT_NAME = "Robot0"
 HOST = "172.20.10.14"
 PORT = 65432 
@@ -200,7 +186,7 @@ def led_off():
     led_out = GPIO.LOW
     GPIO.output(led_output_port, led_out);
 
-lines = ["name.wav"]
+lines = ["madhatter.wav"]
 play = False
 def audio_thread():
     global current_state
